@@ -19,7 +19,7 @@ import pytest
 import mars.oscar as mo
 from mars.oscar.errors import ServerClosed
 from mars.oscar.backends.allocate_strategy import ProcessIndex, MainPool
-from mars.oscar.backends.ray.pool import RayMainPool, RayMainActorPool, create_actor_pool, PoolStatus
+from mars.oscar.backends.ray.pool import RayMainPool, RayMainActorPool, create_actor_pool
 from mars.oscar.backends.ray.utils import process_placement_to_address
 from mars.oscar.context import get_context
 from mars.tests.core import require_ray
@@ -83,10 +83,8 @@ async def test_shutdown_sub_pool(ray_start_regular):
     sub_pool_handle2 = ray.get_actor(sub_pool_address2)
     await actor_handle.actor_pool.remote('stop_sub_pool', sub_pool_address1, sub_pool_handle1, force=True)
     await actor_handle.actor_pool.remote('stop_sub_pool', sub_pool_address2, sub_pool_handle2, force=False)
-    with pytest.raises(AttributeError, match='NoneType'):
-        await sub_pool_handle1.actor_pool.remote('health_check')
-    with pytest.raises(AttributeError, match='NoneType'):
-        await sub_pool_handle2.actor_pool.remote('health_check')
+    assert not (await sub_pool_handle1.health_check.remote())
+    assert not (await sub_pool_handle2.health_check.remote())
 
 
 @require_ray
@@ -166,7 +164,7 @@ async def test_auto_recover(ray_start_regular, auto_recover):
         await ctx.wait_actor_pool_recovered(actor_ref.address, address)
         sub_pool_address = process_placement_to_address(pg_name, 0, process_index=1)
         sub_pool_handle = ray.get_actor(sub_pool_address)
-        assert await sub_pool_handle.actor_pool.remote('health_check') == PoolStatus.HEALTHY
+        assert await sub_pool_handle.health_check.remote()
 
         expect_has_actor = True if auto_recover in ['actor', True] else False
         assert await ctx.has_actor(actor_ref) is expect_has_actor
@@ -179,4 +177,4 @@ async def test_auto_recover(ray_start_regular, auto_recover):
             # must save the local reference until this is fixed:
             # https://github.com/ray-project/ray/issues/7815
             ray_actor = ray.get_actor(addr)
-            ray.get(ray_actor.cleanup.remote())
+            ray.get(ray_actor.collect_coverage.remote())

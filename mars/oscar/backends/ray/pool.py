@@ -20,7 +20,6 @@ import os
 import sys
 import types
 from abc import ABC, abstractmethod
-from enum import Enum
 from typing import List, Optional
 
 from .communication import ChannelID, RayServer, RayChannelException
@@ -98,7 +97,7 @@ class RayMainActorPool(MainActorPoolBase):
     async def kill_sub_pool(self, process: 'ray.actor.ActorHandle', force: bool = False):
         if 'COV_CORE_SOURCE' in os.environ and not force:  # pragma: no cover
             # must clean up first, or coverage info lost
-            await process.cleanup.remote()
+            await process.collect_coverage.remote()
         await self._kill_actor_forcibly(process)
 
     async def _kill_actor_forcibly(self, process: 'ray.actor.ActorHandle'):
@@ -111,18 +110,13 @@ class RayMainActorPool(MainActorPoolBase):
             logger.info(f'Waited {waited_time} seconds for {process} to be killed.')
 
     async def is_sub_pool_alive(self, process: 'ray.actor.ActorHandle'):
+        # make sure that:
+        # 1. the remote call succeeds, and
+        # 2. the actor pool is started.
         try:
-            # try to call the method of sup pool, if success, it's alive.
-            await process.actor_pool.remote('health_check')
-            return True
+            return await process.health_check.remote()
         except Exception:
-            logger.info("Detected RaySubPool %s died", process)
             return False
-
-
-class PoolStatus(Enum):
-    HEALTHY = 0
-    UNHEALTHY = 1
 
 
 @_register_message_handler
@@ -137,8 +131,6 @@ class RaySubActorPool(SubActorPoolBase):
         finally:
             self._stopped.set()
 
-    def health_check(self):  # noqa: R0201  # pylint: disable=no-self-use
-        return PoolStatus.HEALTHY
 
 
 class RayPoolBase(ABC):
@@ -160,6 +152,7 @@ class RayPoolBase(ABC):
     def __init__(self):
         self._actor_pool = None
         self._ray_server = None
+        self._actor_pool_started = False
         register_ray_serializers()
         RayServer.set_ray_actor_started()
 
@@ -190,13 +183,16 @@ class RayPoolBase(ABC):
         else:
             return attr
 
-    def cleanup(self):
+    def collect_coverage(self):
         logger.info('Cleaning up %s of process %s now', self, os.getpid())
         try:
             from pytest_cov.embed import cleanup
             cleanup()
         except ImportError:  # pragma: no cover
             pass
+
+    def health_check(self):
+        return self._actor_pool_started
 
 
 class RayMainPool(RayPoolBase):
@@ -207,6 +203,7 @@ class RayMainPool(RayPoolBase):
         self._actor_pool = await create_actor_pool(
             address, n_process=n_process, pool_cls=RayMainActorPool, **kwargs)
         self._set_ray_server(self._actor_pool)
+        self._actor_pool_started = True
 
 
 class RaySubPool(RayPoolBase):
@@ -224,3 +221,4 @@ class RaySubPool(RayPoolBase):
         self._set_ray_server(self._actor_pool)
         await self._actor_pool.start()
         asyncio.create_task(self._actor_pool.join())
+        self._actor_pool_started = True
