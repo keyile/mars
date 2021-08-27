@@ -93,6 +93,7 @@ class RayMainActorPool(MainActorPoolBase):
             for _, message in self._allocated_actors[address].values():
                 create_actor_message: CreateActorMessage = message
                 await self.call(address, create_actor_message)
+        print('recover done!')
 
     async def kill_sub_pool(self, process: 'ray.actor.ActorHandle', force: bool = False):
         if 'COV_CORE_SOURCE' in os.environ and not force:  # pragma: no cover

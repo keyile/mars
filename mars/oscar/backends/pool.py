@@ -425,7 +425,6 @@ class ActorPoolBase(AbstractActorPool, metaclass=ABCMeta):
             if actor_id in self._actors:
                 raise ActorAlreadyExist(f'Actor {actor_id} already exist, '
                                         f'cannot create')
-
             actor = message.actor_cls(*message.args, **message.kwargs)
             actor.uid = actor_id
             actor.address = address = self.external_address
@@ -435,6 +434,7 @@ class ActorPoolBase(AbstractActorPool, metaclass=ABCMeta):
                 await future
 
             result = ActorRef(address, actor_id)
+            print('create actor:', message.actor_cls, result, message.args, message.kwargs)
             # ensemble result message
             processor.result = ResultMessage(message.message_id, result,
                                              protocol=message.protocol)
@@ -454,6 +454,7 @@ class ActorPoolBase(AbstractActorPool, metaclass=ABCMeta):
         with _ErrorProcessor(message.message_id,
                              message.protocol) as processor:
             actor_id = message.actor_ref.uid
+            print('destroy actor:', message.actor_ref)
             try:
                 actor = self._actors[actor_id]
             except KeyError:
@@ -573,7 +574,7 @@ class ActorPoolBase(AbstractActorPool, metaclass=ABCMeta):
             create_server_tasks.append(task)
         await asyncio.gather(*create_server_tasks)
         kw['servers'] = [f.result() for f in create_server_tasks]
-
+        print('create pool:', cls.__name__, internal_address, external_addresses, os.getpid())
         # create pool
         pool = cls(**kw)
         return pool
@@ -1032,6 +1033,7 @@ class MainActorPoolBase(ActorPoolBase):
                     process = self.sub_processes[address]
                     recover_events_discovered = (address in self._recover_events)
                     if not await self.is_sub_pool_alive(process):  # pragma: no cover
+                        print(f'found the death of {process}!')
                         if self._on_process_down is not None:
                             self._on_process_down(self, address)
                         self.process_sub_pool_lost(address)
